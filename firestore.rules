@@ -1,0 +1,208 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSignedIn() {
+      return isAuthenticated()
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && (!('isActive' in userDoc().data) ||
+              userDoc().data.isActive == true);
+    }
+
+    // Admin check reads the user document once per request evaluation.
+    // isAdmin() is only called where privileged writes are needed; read paths
+    // use the cheaper isSignedIn() wherever possible.
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+          && userDoc().data.role == 'admin';
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isAuthenticated() &&
+        (request.auth.uid == userId || isAdmin());
+      // A user creating their own profile on first sign-in can only grant
+      // themselves the 'user' role. Admin profiles must be provisioned by an
+      // existing admin or through a trusted Firebase Console workflow.
+      allow create: if isAdmin()
+        || (isAuthenticated() && request.auth.uid == userId &&
+            request.resource.data.role == 'user');
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Products (single shared collection) ───────────────────────────────────
+    // Both admin and authenticated users read from this collection.
+    // Purchase-price visibility is enforced at the UI layer; the Firestore
+    // document is readable by any signed-in account so the real-time stream
+    // works without requiring a cross-document user-role lookup on every read.
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'quantity', 'stock', 'isSold', 'updatedAt', 'soldAt'
+        ]));
+    }
+
+    match /product_indexes/{indexId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Product catalog (legacy mirror – kept for backward compatibility) ──────
+    // Simplified to isSignedIn() so no composite index or cross-doc read is
+    // required, eliminating the most common cause of users not seeing products.
+    match /product_catalog/{productId} {
+      allow read: if isSignedIn();
+      // A user's first checkout may need to create this legacy stock mirror
+      // when it does not yet exist. Permit only stock fields on that create.
+      allow create: if isAdmin() || (isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'quantity', 'stock', 'isSold', 'updatedAt'
+        ]));
+      allow delete: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'quantity', 'stock', 'isSold', 'updatedAt', 'soldAt'
+        ]));
+    }
+
+    // ── Categories ────────────────────────────────────────────────────────────
+    match /categories/{categoryId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Sales ─────────────────────────────────────────────────────────────────
+    match /sales/{saleId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /sales_public/{saleId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Transactions ──────────────────────────────────────────────────────────
+    match /transactions/{transactionId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /transactions_public/{transactionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Debtors ───────────────────────────────────────────────────────────────
+    match /debtors/{debtorId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+
+      // Per-debtor detailed history (products taken / debt added / payment).
+      // Entries are append-only for regular users, EXCEPT that recording a
+      // payment (AppProvider.recordPayment) must allocate it across existing
+      // debt entries by updating just paidAmount/profitRealizedCents on each
+      // — so that specific update is allowed for any signed-in user. Any
+      // other field change (a real correction/removal of a past entry)
+      // still requires admin.
+      match /transactions/{transactionId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if isAdmin() || (isSignedIn() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'paidAmount', 'profitRealizedCents'
+          ]));
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Phone -> debtorId lookup used to de-duplicate debtors atomically
+    // (see requirement: adding a debt for an existing phone number must
+    // never create a second debtor record).
+    match /debtor_phone_index/{normalizedPhone} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // ── Payments ──────────────────────────────────────────────────────────────
+    match /payments/{paymentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Admin Notes ───────────────────────────────────────────────────────────
+    match /admin_notes/{noteId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Bills ─────────────────────────────────────────────────────────────────
+    match /bills/{billId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Stock intake (goods brought into the store) ─────────────────────────
+    // Includes purchase price, so admin-only like bills/maintenance below.
+    match /stock_intakes/{intakeId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Maintenance / repair jobs ────────────────────────────────────────────
+    match /maintenance_jobs/{jobId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Shopping list (goods to bring soon) ──────────────────────────────────
+    match /shopping_list_items/{itemId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Settings (e.g. USD→LBP rate) ─────────────────────────────────────────
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Reports ───────────────────────────────────────────────────────────────
+    match /reports/{reportId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Storefront website (storeapp-9dba6's separate public site,
+    // toufic-cell-stream.web.app) ────────────────────────────────────────────
+    // Publicly readable with no auth — the storefront is a static page with
+    // anonymous visitors, unlike every other collection above which requires
+    // sign-in. Only the admin app can edit prices/products/settings.
+    match /storefront_products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /storefront_categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /storefront_settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

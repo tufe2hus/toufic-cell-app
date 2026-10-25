@@ -1,0 +1,47 @@
+{
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22"
+  },
+  "firestore": { "rules": "firestore.rules" },
+  "storage": { "rules": "storage.rules" },
+  "hosting": {
+    "public": "build/web",
+    "ignore": ["firebase.json", "**/.*"],
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "headers": [
+      { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/flutter_service_worker.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/flutter_bootstrap.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/flutter.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/main.dart.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/version.json", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/manifest.json", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/favicon.png", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/icons/**", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "storeapp-9dba6",
+          "appId": "1:101862061936:android:35caeaa887e2ca37c1c1b5",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "storeapp-9dba6",
+          "configurations": {
+            "android": "1:101862061936:android:35caeaa887e2ca37c1c1b5",
+            "ios": "1:101862061936:ios:8956c06769067496c1c1b5",
+            "macos": "1:101862061936:ios:8956c06769067496c1c1b5",
+            "web": "1:101862061936:web:a5cf996e39be5f4fc1c1b5",
+            "windows": "1:101862061936:web:b4a67cd1b2ad52a7c1c1b5"
+          }
+        }
+      }
+    }
+  }
+}
