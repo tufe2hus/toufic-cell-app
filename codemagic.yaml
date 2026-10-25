@@ -1,7 +1,7 @@
 
 workflows:
   ios-workflow:
-    name: Toufic Cell iOS
+    name: Toufic Cell 
     instance_type: mac_mini_m2
     max_build_duration: 60
 
